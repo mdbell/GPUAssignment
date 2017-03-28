@@ -3,6 +3,7 @@ Christopher Ginac
 
 image.cpp
 */
+
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <stdlib.h>
@@ -12,14 +13,14 @@ image.cpp
 using namespace std;
 const int ntpb = 1024;
 
-
-__global__ void negate(int* a, int* b,  int n, int m) {
+__global__ void negate(int* a, int* b, int n, int m) {
 	for (int i = 0; i < m; i++) {
 		int x = threadIdx.x + blockIdx.x * blockDim.x;
 		int y = threadIdx.y + blockIdx.y * blockDim.y;
 		a[y + x * n] = -(b[y + x * n]) + 255;
 	}
 }
+
 Image::Image()
 /* Creates an Image 0x0 */
 {
@@ -36,15 +37,14 @@ Image::Image(int numRows, int numCols, int grayLevels)
 
 	N = numRows;
 	M = numCols;
-	Q = grayLevels;	
-	pixelVal = new int *[N];
+	Q = grayLevels;
+
+	pixelVal = new int[N * M];
 	for (int i = 0; i < N; i++)
 	{
-		pixelVal[i] = new int[M];
 		for (int j = 0; j < M; j++)
-			pixelVal[i][j] = 0;
+			pixelVal[i * M + j] = 0;
 	}
-	
 }
 
 Image::~Image()
@@ -53,10 +53,6 @@ Image::~Image()
 	N = 0;
 	M = 0;
 	Q = 0;
-
-	for (int i = 0; i < N; i++)
-		delete pixelVal[N];
-
 	delete pixelVal;
 }
 
@@ -67,12 +63,11 @@ Image::Image(const Image& oldImage)
 	M = oldImage.M;
 	Q = oldImage.Q;
 
-	pixelVal = new int*[N];
+	pixelVal = new int[N * M];
 	for (int i = 0; i < N; i++)
 	{
-		pixelVal[i] = new int[M];
 		for (int j = 0; j < M; j++)
-			pixelVal[i][j] = oldImage.pixelVal[i][j];
+			pixelVal[i * M + j] = oldImage.pixelVal[i * M + j];
 	}
 }
 
@@ -83,12 +78,11 @@ void Image::operator=(const Image& oldImage)
 	M = oldImage.M;
 	Q = oldImage.Q;
 
-	pixelVal = new int*[N];
+	pixelVal = new int[N * M];
 	for (int i = 0; i < N; i++)
 	{
-		pixelVal[i] = new int[M];
 		for (int j = 0; j < M; j++)
-			pixelVal[i][j] = oldImage.pixelVal[i][j];
+			pixelVal[i * M + j] = oldImage.pixelVal[i * M + j];
 	}
 }
 
@@ -111,14 +105,14 @@ void Image::getImageInfo(int &numRows, int &numCols, int &maxVal)
 int Image::getPixelVal(int row, int col)
 /*returns the gray value of a specific pixel*/
 {
-	return pixelVal[row][col];
+	return pixelVal[row * M + col];
 }
 
 
 void Image::setPixelVal(int row, int col, int value)
 /*sets the gray value of a specific pixel*/
 {
-	pixelVal[row][col] = value;
+	pixelVal[row * M + col] = value;
 }
 
 bool Image::inBounds(int row, int col)
@@ -145,7 +139,7 @@ void Image::getSubImage(int upperLeftRow, int upperLeftCol, int lowerRightRow,
 	for (int i = upperLeftRow; i < lowerRightRow; i++)
 	{
 		for (int j = upperLeftCol; j < lowerRightCol; j++)
-			tempImage.pixelVal[i - upperLeftRow][j - upperLeftCol] = oldImage.pixelVal[i][j];
+			tempImage.pixelVal[(i - upperLeftRow) * height + j - upperLeftCol] = oldImage.pixelVal[i * oldImage.M + j];
 	}
 
 	oldImage = tempImage;
@@ -159,7 +153,7 @@ int Image::meanGray()
 	for (int i = 0; i < N; i++)
 	{
 		for (int j = 0; j < M; j++)
-			totalGray += pixelVal[i][j];
+			totalGray += pixelVal[i * M + j];
 	}
 
 	int cells = M * N;
@@ -185,14 +179,14 @@ larger image in oldImage*/
 	{
 		for (int j = 0; j < oldImage.M; j++)
 		{
-			pixel = oldImage.pixelVal[i][j];
+			pixel = oldImage.pixelVal[i * oldImage.M + j];
 			enlargeRow = i * value;
 			enlargeCol = j * value;
 			for (int c = enlargeRow; c < (enlargeRow + value); c++)
 			{
 				for (int d = enlargeCol; d < (enlargeCol + value); d++)
 				{
-					tempImage.pixelVal[c][d] = pixel;
+					tempImage.pixelVal[c * cols + d] = pixel;
 				}
 			}
 		}
@@ -216,7 +210,7 @@ oldImage*/
 	for (int i = 0; i < rows; i++)
 	{
 		for (int j = 0; j < cols; j++)
-			tempImage.pixelVal[i][j] = oldImage.pixelVal[i * value][j * value];
+			tempImage.pixelVal[i * cols + j] = oldImage.pixelVal[(i * value) * cols + j * value];
 	}
 	oldImage = tempImage;
 }
@@ -232,7 +226,7 @@ void Image::reflectImage(bool flag, Image& oldImage)
 		for (int i = 0; i < rows; i++)
 		{
 			for (int j = 0; j < cols; j++)
-				tempImage.pixelVal[rows - (i + 1)][j] = oldImage.pixelVal[i][j];
+				tempImage.pixelVal[(rows - (i + 1)) * cols + j] = oldImage.pixelVal[i * cols + j];
 		}
 	}
 	else //vertical reflection
@@ -240,7 +234,7 @@ void Image::reflectImage(bool flag, Image& oldImage)
 		for (int i = 0; i < rows; i++)
 		{
 			for (int j = 0; j < cols; j++)
-				tempImage.pixelVal[i][cols - (j + 1)] = oldImage.pixelVal[i][j];
+				tempImage.pixelVal[i * cols + cols - (j + 1)] = oldImage.pixelVal[i * cols + j];
 		}
 	}
 
@@ -258,7 +252,7 @@ void Image::translateImage(int value, Image& oldImage)
 	for (int i = 0; i < (rows - value); i++)
 	{
 		for (int j = 0; j < (cols - value); j++)
-			tempImage.pixelVal[i + value][j + value] = oldImage.pixelVal[i][j];
+			tempImage.pixelVal[(i + value) * cols + j + value] = oldImage.pixelVal[i * cols + j];
 	}
 
 	oldImage = tempImage;
@@ -288,7 +282,7 @@ void Image::rotateImage(int theta, Image& oldImage)
 
 			if (inBounds(r1, c1))
 			{
-				tempImage.pixelVal[r1][c1] = oldImage.pixelVal[r][c];
+				tempImage.pixelVal[r1 * cols + c1] = oldImage.pixelVal[r * cols + c];
 			}
 		}
 	}
@@ -297,8 +291,8 @@ void Image::rotateImage(int theta, Image& oldImage)
 	{
 		for (int j = 0; j < cols; j++)
 		{
-			if (tempImage.pixelVal[i][j] == 0)
-				tempImage.pixelVal[i][j] = tempImage.pixelVal[i][j + 1];
+			if (tempImage.pixelVal[i * cols + j] == 0)
+				tempImage.pixelVal[i * cols + j] = tempImage.pixelVal[i * cols + j + 1];
 		}
 	}
 	oldImage = tempImage;
@@ -316,7 +310,7 @@ Image Image::operator+(const Image &oldImage)
 	for (int i = 0; i < rows; i++)
 	{
 		for (int j = 0; j < cols; j++)
-			tempImage.pixelVal[i][j] = (pixelVal[i][j] + oldImage.pixelVal[i][j]) / 2;
+			tempImage.pixelVal[i * cols + j] = (pixelVal[i * cols + j] + oldImage.pixelVal[i * cols + j]) / 2;
 	}
 
 	return tempImage;
@@ -337,10 +331,10 @@ Image Image::operator-(const Image& oldImage)
 		for (int j = 0; j < cols; j++)
 		{
 
-			tempGray = abs(pixelVal[i][j] - oldImage.pixelVal[i][j]);
+			tempGray = abs(pixelVal[i * cols + j] - oldImage.pixelVal[i * cols + j]);
 			if (tempGray < 35)// accounts for sensor flux
 				tempGray = 0;
-			tempImage.pixelVal[i][j] = tempGray;
+			tempImage.pixelVal[i * cols + j] = tempGray;
 		}
 
 	}
@@ -360,8 +354,8 @@ void Image::negateImage(Image& oldImage)
 
 	/*for (int i = 0; i < rows; i++)
 	{
-		for (int j = 0; j < cols; j++)
-			tempImage.pixelVal[i][j] = -(pixelVal[i][j]) + 255;
+	for (int j = 0; j < cols; j++)
+	tempImage.pixelVal[i][j] = -(pixelVal[i][j]) + 255;
 	}*/
 	//int nblks = (N + ntpb - 1) / ntpb;
 

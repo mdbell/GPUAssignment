@@ -33,7 +33,7 @@ private:
 	int N; // number of rows
 	int M; // number of columns
 	int Q; // number of gray levels
-	int **pixelVal;
+	int *pixelVal;
 };
 
 #endif
