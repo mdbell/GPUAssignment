@@ -13,11 +13,10 @@ image.cpp
 using namespace std;
 const int ntpb = 1024;
 
-__global__ void negate(int* a, int* b, int n, int m) {
-	for (int i = 0; i < m; i++) {
-		int x = threadIdx.x + blockIdx.x * blockDim.x;
-		int y = threadIdx.y + blockIdx.y * blockDim.y;
-		a[y + x * n] = -(b[y + x * n]) + 255;
+__global__ void negate(int* a, int* b, int n) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < n) {
+		a[idx] = -(b[idx]) + 255;
 	}
 }
 
@@ -345,38 +344,27 @@ Image Image::operator-(const Image& oldImage)
 void Image::negateImage(Image& oldImage)
 /*negates image*/
 {
-	int rows, cols, gray;
-	rows = N;
-	cols = M;
-	gray = Q;
-
 	Image tempImage(N, M, Q);
 
 	/*for (int i = 0; i < rows; i++)
 	{
-	for (int j = 0; j < cols; j++)
-	tempImage.pixelVal[i][j] = -(pixelVal[i][j]) + 255;
+		for (int j = 0; j < cols; j++)
+			tempImage.pixelVal[i * cols + j] = -(pixelVal[i * cols + j]) + 255;
 	}*/
-	//int nblks = (N + ntpb - 1) / ntpb;
 
-	int* d_temp;
-	int* d_img;
-	std::cout << "Malloc \n";
-	cudaMalloc((void**)&d_temp, N * M * sizeof(int));
-	cudaMalloc((void**)&d_img, N * M * sizeof(int));
-	std::cout << "copying \n";
-	cudaMemcpy(d_temp, tempImage.pixelVal, N * M * sizeof(int), cudaMemcpyHostToDevice);
-	std::cout << "copying \n";
-	cudaMemcpy(d_img, pixelVal, N * M * sizeof(int), cudaMemcpyHostToDevice);
-	std::cout << "kernel \n";
-	negate << <1, N >> > (d_temp, d_img, N, M);
-	std::cout << "copying";
-	cudaMemcpy(tempImage.pixelVal, d_temp, N * M * sizeof(int), cudaMemcpyDeviceToHost);
-
+	int* d_temp = nullptr;
+	int* d_img = nullptr;
+	int size = N * M;
+	int nblocks = size / ntpb;
+	cudaMalloc((void**)&d_temp, size * sizeof(int));
+	cudaMalloc((void**)&d_img, size * sizeof(int));
+	cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_img, pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	negate<<<nblocks, ntpb>>>(d_temp, d_img, size);
+	cudaDeviceSynchronize();
+	cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
 	cudaFree(d_temp);
 	cudaFree(d_img);
-
-	/**/
 
 	oldImage = tempImage;
 }
