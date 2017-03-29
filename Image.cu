@@ -13,6 +13,16 @@ image.cpp
 using namespace std;
 const int ntpb = 1024;
 
+__global__ void enlarge(int* a, int* b, int sz, int scale, int cols, int scols) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	int x = idx / scols;
+	int y = idx % scols;
+	if (idx < sz) {
+		a[idx] = b[(x / scale) * cols + (y / scale)];
+		//a[idx] = 0xFFFFFFFF;
+	}
+}
+
 __global__ void negate(int* a, int* b, int n) {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < n) {
@@ -30,7 +40,7 @@ __global__ void verticalReflect(int* a, int* b, int sz, int n, int m) {
 	}
 }
 
-__global__ void horizontalReflect(int* a, int* b,int sz, int n, int m) {
+__global__ void horizontalReflect(int* a, int* b, int sz, int n, int m) {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	int x = idx / m;
 	int y = idx % m;
@@ -193,6 +203,33 @@ larger image in oldImage*/
 
 	Image tempImage(rows, cols, gray);
 
+	
+	int r = oldImage.N;
+	int c = oldImage.M;
+
+	int* d_temp = nullptr;
+	int* d_img = nullptr;
+	int size = rows * cols;
+	int nblocks = size / ntpb;
+
+	cudaMalloc((void**)&d_temp, size * sizeof(int));
+	cudaMalloc((void**)&d_img, size * sizeof(int));
+	
+	cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_img, oldImage.pixelVal, (r * c) * sizeof(int), cudaMemcpyHostToDevice);
+
+	enlarge << <nblocks, ntpb >> >(d_temp, d_img, size, value, c, cols);
+
+	cudaDeviceSynchronize();
+
+	//set the image's data
+	cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
+
+	//free device mem
+	cudaFree(d_temp);
+	cudaFree(d_img);
+	/*
+	
 	for (int i = 0; i < oldImage.N; i++)
 	{
 		for (int j = 0; j < oldImage.M; j++)
@@ -209,7 +246,7 @@ larger image in oldImage*/
 			}
 		}
 	}
-
+	/**/
 	oldImage = tempImage;
 }
 
@@ -242,19 +279,19 @@ void Image::reflectImage(bool flag, Image& oldImage)
 	/*
 	if (flag == true) //horizontal reflection
 	{
-		for (int i = 0; i < rows; i++)
-		{
-			for (int j = 0; j < cols; j++)
-				tempImage.pixelVal[(rows - (i + 1)) * cols + j] = oldImage.pixelVal[i * cols + j];
-		}
+	for (int i = 0; i < rows; i++)
+	{
+	for (int j = 0; j < cols; j++)
+	tempImage.pixelVal[(rows - (i + 1)) * cols + j] = oldImage.pixelVal[i * cols + j];
+	}
 	}
 	else //vertical reflection
 	{
-		for (int i = 0; i < rows; i++)
-		{
-			for (int j = 0; j < cols; j++)
-				tempImage.pixelVal[i * cols + cols - (j + 1)] = oldImage.pixelVal[i * cols + j];
-		}
+	for (int i = 0; i < rows; i++)
+	{
+	for (int j = 0; j < cols; j++)
+	tempImage.pixelVal[i * cols + cols - (j + 1)] = oldImage.pixelVal[i * cols + j];
+	}
 	}
 	*/
 	int* d_temp = nullptr;
@@ -266,16 +303,16 @@ void Image::reflectImage(bool flag, Image& oldImage)
 	cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_img, oldImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
 	if (flag) {
-		horizontalReflect<<<nblocks, ntpb>>>(d_temp, d_img, size, rows, cols);
+		horizontalReflect << <nblocks, ntpb >> >(d_temp, d_img, size, rows, cols);
 	}
 	else {
-		verticalReflect<<<nblocks, ntpb>>>(d_temp, d_img, size, rows, cols);
+		verticalReflect << <nblocks, ntpb >> >(d_temp, d_img, size, rows, cols);
 	}
 	cudaDeviceSynchronize();
 	cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
 	cudaFree(d_temp);
 	cudaFree(d_img);
-	
+
 	oldImage = tempImage;
 }
 
@@ -387,8 +424,8 @@ void Image::negateImage(Image& oldImage)
 
 	/*for (int i = 0; i < rows; i++)
 	{
-		for (int j = 0; j < cols; j++)
-			tempImage.pixelVal[i * cols + j] = -(pixelVal[i * cols + j]) + 255;
+	for (int j = 0; j < cols; j++)
+	tempImage.pixelVal[i * cols + j] = -(pixelVal[i * cols + j]) + 255;
 	}*/
 
 	int* d_temp = nullptr;
@@ -399,7 +436,13 @@ void Image::negateImage(Image& oldImage)
 	cudaMalloc((void**)&d_img, size * sizeof(int));
 	cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_img, pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
-	negate<<<nblocks, ntpb>>>(d_temp, d_img, size);
+	
+	negate << <nblocks, ntpb >> >(d_temp, d_img, size);
+
+	cudaError_t err = cudaGetLastError();
+	if (err != cudaSuccess) 
+		printf("Error: %s\n", cudaGetErrorString(err));
+	
 	cudaDeviceSynchronize();
 	cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
 	cudaFree(d_temp);
