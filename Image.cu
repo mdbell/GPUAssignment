@@ -20,6 +20,25 @@ __global__ void negate(int* a, int* b, int n) {
 	}
 }
 
+__global__ void verticalReflect(int* a, int* b, int sz, int n, int m) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	int x = idx / m;
+	int y = idx % m;
+	if (idx < sz) {
+		//a[idx] = b[x * m + (m - y)];
+		a[x * m + (m - y)] = b[idx];
+	}
+}
+
+__global__ void horizontalReflect(int* a, int* b,int sz, int n, int m) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	int x = idx / m;
+	int y = idx % m;
+	if (idx < sz) {
+		a[(n - x) * m + y] = b[idx];
+	}
+}
+
 Image::Image()
 /* Creates an Image 0x0 */
 {
@@ -220,6 +239,7 @@ void Image::reflectImage(bool flag, Image& oldImage)
 	int rows = oldImage.N;
 	int cols = oldImage.M;
 	Image tempImage(oldImage);
+	/*
 	if (flag == true) //horizontal reflection
 	{
 		for (int i = 0; i < rows; i++)
@@ -236,7 +256,26 @@ void Image::reflectImage(bool flag, Image& oldImage)
 				tempImage.pixelVal[i * cols + cols - (j + 1)] = oldImage.pixelVal[i * cols + j];
 		}
 	}
-
+	*/
+	int* d_temp = nullptr;
+	int* d_img = nullptr;
+	int size = rows * cols;
+	int nblocks = size / ntpb;
+	cudaMalloc((void**)&d_temp, size * sizeof(int));
+	cudaMalloc((void**)&d_img, size * sizeof(int));
+	cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_img, oldImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	if (flag) {
+		horizontalReflect<<<nblocks, ntpb>>>(d_temp, d_img, size, rows, cols);
+	}
+	else {
+		verticalReflect<<<nblocks, ntpb>>>(d_temp, d_img, size, rows, cols);
+	}
+	cudaDeviceSynchronize();
+	cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
+	cudaFree(d_temp);
+	cudaFree(d_img);
+	
 	oldImage = tempImage;
 }
 
