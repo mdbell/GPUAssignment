@@ -109,6 +109,7 @@ int readImage(char fname[], Image& image)
 	int i, j;
 	int N, M, Q;
 	unsigned char *charImage;
+	int* intImage;
 	char header[100], *ptr;
 	ifstream ifp;
 
@@ -140,6 +141,7 @@ int readImage(char fname[], Image& image)
 	Q = strtol(header, &ptr, 0);
 
 	charImage = (unsigned char *) new unsigned char[M*N];
+	intImage = new int[M * N];
 
 	ifp.read(reinterpret_cast<char *>(charImage), (M*N) * sizeof(unsigned char));
 
@@ -155,17 +157,18 @@ int readImage(char fname[], Image& image)
 	// Convert the unsigned characters to integers
 	//
 
-	int val;
+	int idx;
 
 	for (i = 0; i<N; i++)
 		for (j = 0; j<M; j++)
 		{
-			val = (int)charImage[i*M + j];
-			image.setPixelVal(i, j, val);
+			idx = i*M + j;
+			intImage[idx] = (int)charImage[idx];
 		}
 
+	image.setPixels(0,0,M * N, intImage);
 	delete[] charImage;
-
+	delete[] intImage;
 
 	return (1);
 
@@ -176,22 +179,25 @@ int writeImage(char fname[], Image& image)
 	int i, j;
 	int N, M, Q;
 	unsigned char *charImage;
+	int* intImage;
 	ofstream ofp;
 
 	image.getImageInfo(N, M, Q);
 
 	charImage = (unsigned char *) new unsigned char[M*N];
-
+	intImage = new int[M * N];
+	image.getPixels(0,0,M * N, intImage); // get rgb pixels
+	
 	// convert the integer values to unsigned char
 
-	int val;
+	int idx;
 
 	for (i = 0; i<N; i++)
 	{
 		for (j = 0; j<M; j++)
 		{
-			val = image.getPixelVal(i, j);
-			charImage[i*M + j] = (unsigned char)val;
+			idx = i*M + j;
+			charImage[idx] = (unsigned char)intImage[idx];
 		}
 	}
 
@@ -218,7 +224,8 @@ int writeImage(char fname[], Image& image)
 	ofp.close();
 
 	delete[] charImage;
-
+	delete[] intImage;
+	
 	return(1);
 
 }

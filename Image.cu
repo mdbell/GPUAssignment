@@ -66,22 +66,24 @@ Image::Image(int numRows, int numCols, int grayLevels)
 	N = numRows;
 	M = numCols;
 	Q = grayLevels;
-
-	pixelVal = new int[N * M];
+	cudaMalloc((void**)&pixelVal, N * M * sizeof(int));
+	cudaMemset(pixelVal,0,N * M * sizeof(int));
+	/*	pixelVal = new int[N * M];
 	for (int i = 0; i < N; i++)
 	{
-		for (int j = 0; j < M; j++)
-			pixelVal[i * M + j] = 0;
+	for (int j = 0; j < M; j++)
+	pixelVal[i * M + j] = 0;
 	}
+	*/
 }
 
 Image::~Image()
 /*destroy image*/
 {
-	N = 0;
-	M = 0;
-	Q = 0;
-	delete pixelVal;
+	if (pixelVal) {
+		cudaFree(pixelVal);
+	}
+	//delete pixelVal;
 }
 
 Image::Image(const Image& oldImage)
@@ -90,13 +92,9 @@ Image::Image(const Image& oldImage)
 	N = oldImage.N;
 	M = oldImage.M;
 	Q = oldImage.Q;
-
-	pixelVal = new int[N * M];
-	for (int i = 0; i < N; i++)
-	{
-		for (int j = 0; j < M; j++)
-			pixelVal[i * M + j] = oldImage.pixelVal[i * M + j];
-	}
+	int sz = M * N * sizeof(int);
+	cudaMalloc((void**)&pixelVal, sz);
+	cudaMemcpy(pixelVal, oldImage.pixelVal, sz, cudaMemcpyDeviceToDevice);
 }
 
 void Image::operator=(const Image& oldImage)
@@ -106,12 +104,13 @@ void Image::operator=(const Image& oldImage)
 	M = oldImage.M;
 	Q = oldImage.Q;
 
-	pixelVal = new int[N * M];
-	for (int i = 0; i < N; i++)
-	{
-		for (int j = 0; j < M; j++)
-			pixelVal[i * M + j] = oldImage.pixelVal[i * M + j];
+	if (pixelVal) {
+		cudaFree(pixelVal);
 	}
+
+	int sz = M * N * sizeof(int);
+	cudaMalloc((void**)&pixelVal, sz);
+	cudaMemcpy(pixelVal, oldImage.pixelVal, sz, cudaMemcpyDeviceToDevice);
 }
 
 void Image::setImageInfo(int numRows, int numCols, int maxVal)
@@ -133,60 +132,27 @@ void Image::getImageInfo(int &numRows, int &numCols, int &maxVal)
 int Image::getPixelVal(int row, int col)
 /*returns the gray value of a specific pixel*/
 {
-	return pixelVal[row * M + col];
+	int i = 0;
+	int* idx = pixelVal + (row * M + col);
+	cudaMemcpy(&i, idx, sizeof(int), cudaMemcpyDeviceToHost);
+	return i;
 }
 
 
 void Image::setPixelVal(int row, int col, int value)
 /*sets the gray value of a specific pixel*/
 {
-	pixelVal[row * M + col] = value;
+	int* idx = pixelVal + (row * M + col);
+	cudaMemcpy(idx, &value, sizeof(int), cudaMemcpyHostToDevice);
+//	pixelVal[row * M + col] = value;
 }
 
-bool Image::inBounds(int row, int col)
-/*checks to see if a pixel is within the image, returns true or false*/
-{
-	if (row >= N || row < 0 || col >= M || col < 0)
-		return false;
-	//else
-	return true;
+void Image::getPixels(int row, int col, int sz, int* out) {
+	cudaMemcpy(out, pixelVal + (row * M + col), sz * sizeof(int), cudaMemcpyDeviceToHost);
 }
 
-void Image::getSubImage(int upperLeftRow, int upperLeftCol, int lowerRightRow,
-	int lowerRightCol, Image& oldImage)
-	/*Pulls a sub image out of oldImage based on users values, and then stores it
-	in oldImage*/
-{
-	int width, height;
-
-	width = lowerRightCol - upperLeftCol;
-	height = lowerRightRow - upperLeftRow;
-
-	Image tempImage(height, width, Q);
-
-	for (int i = upperLeftRow; i < lowerRightRow; i++)
-	{
-		for (int j = upperLeftCol; j < lowerRightCol; j++)
-			tempImage.pixelVal[(i - upperLeftRow) * height + j - upperLeftCol] = oldImage.pixelVal[i * oldImage.M + j];
-	}
-
-	oldImage = tempImage;
-}
-
-int Image::meanGray()
-/*returns the mean gray levels of the Image*/
-{
-	int totalGray = 0;
-
-	for (int i = 0; i < N; i++)
-	{
-		for (int j = 0; j < M; j++)
-			totalGray += pixelVal[i * M + j];
-	}
-
-	int cells = M * N;
-
-	return (totalGray / cells);
+void Image::setPixels(int row, int col, int sz, int* in) {
+		cudaMemcpy(pixelVal + (row * M + col), in, sz * sizeof(int), cudaMemcpyHostToDevice);
 }
 
 void Image::enlargeImage(int value, Image& oldImage)
@@ -203,70 +169,50 @@ larger image in oldImage*/
 
 	Image tempImage(rows, cols, gray);
 
-	
+
 	int r = oldImage.N;
 	int c = oldImage.M;
 
-	int* d_temp = nullptr;
-	int* d_img = nullptr;
+	int* d_temp = tempImage.pixelVal;
+	int* d_img = oldImage.pixelVal;
 	int size = rows * cols;
 	int nblocks = size / ntpb;
 
-	cudaMalloc((void**)&d_temp, size * sizeof(int));
-	cudaMalloc((void**)&d_img, size * sizeof(int));
-	
-	cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_img, oldImage.pixelVal, (r * c) * sizeof(int), cudaMemcpyHostToDevice);
+	//cudaMalloc((void**)&d_temp, size * sizeof(int));
+	//cudaMalloc((void**)&d_img, size * sizeof(int));
+
+	//cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	//cudaMemcpy(d_img, oldImage.pixelVal, (r * c) * sizeof(int), cudaMemcpyHostToDevice);
 
 	enlarge << <nblocks, ntpb >> >(d_temp, d_img, size, value, c, cols);
 
 	cudaDeviceSynchronize();
 
 	//set the image's data
-	cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
+	//cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
 
 	//free device mem
-	cudaFree(d_temp);
-	cudaFree(d_img);
+	//cudaFree(d_temp);
+	//cudaFree(d_img);
 	/*
-	
+
 	for (int i = 0; i < oldImage.N; i++)
 	{
-		for (int j = 0; j < oldImage.M; j++)
-		{
-			pixel = oldImage.pixelVal[i * oldImage.M + j];
-			enlargeRow = i * value;
-			enlargeCol = j * value;
-			for (int c = enlargeRow; c < (enlargeRow + value); c++)
-			{
-				for (int d = enlargeCol; d < (enlargeCol + value); d++)
-				{
-					tempImage.pixelVal[c * cols + d] = pixel;
-				}
-			}
-		}
+	for (int j = 0; j < oldImage.M; j++)
+	{
+	pixel = oldImage.pixelVal[i * oldImage.M + j];
+	enlargeRow = i * value;
+	enlargeCol = j * value;
+	for (int c = enlargeRow; c < (enlargeRow + value); c++)
+	{
+	for (int d = enlargeCol; d < (enlargeCol + value); d++)
+	{
+	tempImage.pixelVal[c * cols + d] = pixel;
+	}
+	}
+	}
 	}
 	/**/
-	oldImage = tempImage;
-}
-
-void Image::shrinkImage(int value, Image& oldImage)
-/*Shrinks image as storing it in tempImage, resizes oldImage, and stores it in
-oldImage*/
-{
-	int rows, cols, gray;
-
-	rows = oldImage.N / value;
-	cols = oldImage.M / value;
-	gray = oldImage.Q;
-
-	Image tempImage(rows, cols, gray);
-
-	for (int i = 0; i < rows; i++)
-	{
-		for (int j = 0; j < cols; j++)
-			tempImage.pixelVal[i * cols + j] = oldImage.pixelVal[(i * value) * cols + j * value];
-	}
 	oldImage = tempImage;
 }
 
@@ -276,32 +222,16 @@ void Image::reflectImage(bool flag, Image& oldImage)
 	int rows = oldImage.N;
 	int cols = oldImage.M;
 	Image tempImage(oldImage);
-	/*
-	if (flag == true) //horizontal reflection
-	{
-	for (int i = 0; i < rows; i++)
-	{
-	for (int j = 0; j < cols; j++)
-	tempImage.pixelVal[(rows - (i + 1)) * cols + j] = oldImage.pixelVal[i * cols + j];
-	}
-	}
-	else //vertical reflection
-	{
-	for (int i = 0; i < rows; i++)
-	{
-	for (int j = 0; j < cols; j++)
-	tempImage.pixelVal[i * cols + cols - (j + 1)] = oldImage.pixelVal[i * cols + j];
-	}
-	}
-	*/
-	int* d_temp = nullptr;
-	int* d_img = nullptr;
+
+	int* d_temp = tempImage.pixelVal;
+	int* d_img = oldImage.pixelVal;
+	
 	int size = rows * cols;
 	int nblocks = size / ntpb;
-	cudaMalloc((void**)&d_temp, size * sizeof(int));
-	cudaMalloc((void**)&d_img, size * sizeof(int));
-	cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_img, oldImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	//cudaMalloc((void**)&d_temp, size * sizeof(int));
+	//cudaMalloc((void**)&d_img, size * sizeof(int));
+	//cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	//cudaMemcpy(d_img, oldImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
 	if (flag) {
 		horizontalReflect << <nblocks, ntpb >> >(d_temp, d_img, size, rows, cols);
 	}
@@ -309,112 +239,11 @@ void Image::reflectImage(bool flag, Image& oldImage)
 		verticalReflect << <nblocks, ntpb >> >(d_temp, d_img, size, rows, cols);
 	}
 	cudaDeviceSynchronize();
-	cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
-	cudaFree(d_temp);
-	cudaFree(d_img);
+	//cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
+	//cudaFree(d_temp);
+	//cudaFree(d_img);
 
 	oldImage = tempImage;
-}
-
-void Image::translateImage(int value, Image& oldImage)
-/*translates image down and right based on user value*/
-{
-	int rows = oldImage.N;
-	int cols = oldImage.M;
-	int gray = oldImage.Q;
-	Image tempImage(N, M, Q);
-
-	for (int i = 0; i < (rows - value); i++)
-	{
-		for (int j = 0; j < (cols - value); j++)
-			tempImage.pixelVal[(i + value) * cols + j + value] = oldImage.pixelVal[i * cols + j];
-	}
-
-	oldImage = tempImage;
-}
-
-void Image::rotateImage(int theta, Image& oldImage)
-/*based on users input and rotates it around the center of the image.*/
-{
-	int r0, c0;
-	int r1, c1;
-	int rows, cols;
-	rows = oldImage.N;
-	cols = oldImage.M;
-	Image tempImage(rows, cols, oldImage.Q);
-
-	float rads = (theta * 3.14159265) / 180.0;
-
-	r0 = rows / 2;
-	c0 = cols / 2;
-
-	for (int r = 0; r < rows; r++)
-	{
-		for (int c = 0; c < cols; c++)
-		{
-			r1 = (int)(r0 + ((r - r0) * cos(rads)) - ((c - c0) * sin(rads)));
-			c1 = (int)(c0 + ((r - r0) * sin(rads)) + ((c - c0) * cos(rads)));
-
-			if (inBounds(r1, c1))
-			{
-				tempImage.pixelVal[r1 * cols + c1] = oldImage.pixelVal[r * cols + c];
-			}
-		}
-	}
-
-	for (int i = 0; i < rows; i++)
-	{
-		for (int j = 0; j < cols; j++)
-		{
-			if (tempImage.pixelVal[i * cols + j] == 0)
-				tempImage.pixelVal[i * cols + j] = tempImage.pixelVal[i * cols + j + 1];
-		}
-	}
-	oldImage = tempImage;
-}
-
-Image Image::operator+(const Image &oldImage)
-/*adds images together, half one image, half the other*/
-{
-	Image tempImage(oldImage);
-
-	int rows, cols;
-	rows = oldImage.N;
-	cols = oldImage.M;
-
-	for (int i = 0; i < rows; i++)
-	{
-		for (int j = 0; j < cols; j++)
-			tempImage.pixelVal[i * cols + j] = (pixelVal[i * cols + j] + oldImage.pixelVal[i * cols + j]) / 2;
-	}
-
-	return tempImage;
-}
-
-Image Image::operator-(const Image& oldImage)
-/*subtracts images from each other*/
-{
-	Image tempImage(oldImage);
-
-	int rows, cols;
-	rows = oldImage.N;
-	cols = oldImage.M;
-	int tempGray = 0;
-
-	for (int i = 0; i < rows; i++)
-	{
-		for (int j = 0; j < cols; j++)
-		{
-
-			tempGray = abs(pixelVal[i * cols + j] - oldImage.pixelVal[i * cols + j]);
-			if (tempGray < 35)// accounts for sensor flux
-				tempGray = 0;
-			tempImage.pixelVal[i * cols + j] = tempGray;
-		}
-
-	}
-
-	return tempImage;
 }
 
 void Image::negateImage(Image& oldImage)
@@ -428,25 +257,26 @@ void Image::negateImage(Image& oldImage)
 	tempImage.pixelVal[i * cols + j] = -(pixelVal[i * cols + j]) + 255;
 	}*/
 
-	int* d_temp = nullptr;
-	int* d_img = nullptr;
+	int* d_temp = tempImage.pixelVal;
+	int* d_img = pixelVal;
 	int size = N * M;
 	int nblocks = size / ntpb;
-	cudaMalloc((void**)&d_temp, size * sizeof(int));
-	cudaMalloc((void**)&d_img, size * sizeof(int));
-	cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_img, pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
 	
+	//cudaMalloc((void**)&d_temp, size * sizeof(int));
+	//cudaMalloc((void**)&d_img, size * sizeof(int));
+	//cudaMemcpy(d_temp, tempImage.pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+	//cudaMemcpy(d_img, pixelVal, size * sizeof(int), cudaMemcpyHostToDevice);
+
 	negate << <nblocks, ntpb >> >(d_temp, d_img, size);
 
 	cudaError_t err = cudaGetLastError();
-	if (err != cudaSuccess) 
+	if (err != cudaSuccess)
 		printf("Error: %s\n", cudaGetErrorString(err));
-	
+
 	cudaDeviceSynchronize();
-	cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
-	cudaFree(d_temp);
-	cudaFree(d_img);
+	//cudaMemcpy(tempImage.pixelVal, d_temp, size * sizeof(int), cudaMemcpyDeviceToHost);
+	//cudaFree(d_temp);
+	//cudaFree(d_img);
 
 	oldImage = tempImage;
 }
